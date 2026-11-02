@@ -1,3 +1,4 @@
+import { onDispose } from 'maverick.js';
 import { DOMEvent, isFunction, isString, isUndefined } from 'maverick.js/std';
 
 import type { MediaContext } from '../../core/api/media-context';
@@ -15,11 +16,16 @@ export class HLSLibLoader {
   #lib: HLSLibrary;
   #ctx: MediaContext;
   #callback: (ctor: HLSConstructor) => void;
+  #disposed = false;
 
   constructor(lib: HLSLibrary, ctx: MediaContext, callback: (ctor: HLSConstructor) => void) {
     this.#lib = lib;
     this.#ctx = ctx;
     this.#callback = callback;
+    // The library request can finish after the provider scope is destroyed.
+    onDispose(() => {
+      this.#disposed = true;
+    });
     this.#startLoading();
   }
 
@@ -34,12 +40,13 @@ export class HLSLibLoader {
 
     // If not a string it'll return undefined.
     let ctor = await loadHLSScript(this.#lib, callbacks);
+    if (this.#disposed) return null;
 
     // If it's not a remote source, it must of been passed in directly as a static/dynamic import.
     if (isUndefined(ctor) && !isString(this.#lib)) ctor = await importHLS(this.#lib, callbacks);
 
     // We failed loading the constructor.
-    if (!ctor) return null;
+    if (this.#disposed || !ctor) return null;
 
     // Not supported.
     if (!ctor.isSupported()) {
@@ -54,6 +61,7 @@ export class HLSLibLoader {
   }
 
   #onLoadStart() {
+    if (this.#disposed) return;
     if (__DEV__) {
       this.#ctx.logger
         ?.infoGroup('Starting to load `hls.js`')
@@ -65,6 +73,7 @@ export class HLSLibLoader {
   }
 
   #onLoaded(ctor: HLSConstructor) {
+    if (this.#disposed) return;
     if (__DEV__) {
       this.#ctx.logger
         ?.infoGroup('Loaded `hls.js`')
@@ -83,6 +92,7 @@ export class HLSLibLoader {
   }
 
   #onLoadError(e) {
+    if (this.#disposed) return;
     const error = coerceToError(e);
 
     if (__DEV__) {
